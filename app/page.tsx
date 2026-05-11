@@ -1,12 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChatWindow } from "@/components/ChatWindow";
 import { CommandInput } from "@/components/CommandInput";
 import { CrmPanel } from "@/components/CrmPanel";
 import { ChatMessage } from "@/components/MessageBubble";
 import { detectCrmIntent, ChatTurn } from "@/lib/agent";
-import { isCrmStatus, loadCrm, renderCrmMarkdown, upsertEntry } from "@/lib/tools/crm";
+import {
+  isCrmStatus,
+  loadCrm,
+  renderCrmMarkdown,
+  saveFiche,
+  upsertEntry,
+} from "@/lib/tools/crm";
 
 function newId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -22,9 +28,101 @@ function toHistory(messages: ChatMessage[]): ChatTurn[] {
     .slice(-10);
 }
 
+/* ---------- Content classifiers ---------- */
+
+const FICHE_RE = /(^|\n)\s*\*{0,2}FICHE\s*—|(^|\n)\s*\*{0,2}Score\s*:/i;
+const COLD_EMAIL_RE = /\*{0,2}Étape\s*:\*{0,2}\s*cold\b/i;
+const VEILLE_RE = /Veille\b|Régulateur|Échéances?|obligation/i;
+const EMAIL_RE = /(^|\n)\s*\*{0,2}(Objet|Onderwerp)\s*:/i;
+
+function detectFiche(content: string): boolean {
+  return FICHE_RE.test(content);
+}
+
+function extractBroadcasterFromFiche(content: string): string | null {
+  const m = content.match(/FICHE\s*—\s*([^\n]+)/i);
+  if (m) return m[1]!.replace(/\*+/g, "").trim();
+  return null;
+}
+
+function classifyAgent(content: string):
+  | "fiche"
+  | "cold_email"
+  | "email"
+  | "veille"
+  | "other" {
+  if (detectFiche(content)) return "fiche";
+  if (COLD_EMAIL_RE.test(content)) return "cold_email";
+  if (EMAIL_RE.test(content)) return "email";
+  if (VEILLE_RE.test(content)) return "veille";
+  return "other";
+}
+
+function buildDynamicSuggestions(content: string): string[] {
+  const kind = classifyAgent(content);
+  if (kind === "fiche") {
+    const b = extractBroadcasterFromFiche(content) ?? "ce diffuseur";
+    return [
+      `Génère l'email cold pour ${b}`,
+      `crm update "${b}" Cold "À contacter"`,
+    ];
+  }
+  if (kind === "cold_email") {
+    return [
+      "Génère la séquence complète des 4 emails",
+      "Génère la relance J+7",
+    ];
+  }
+  if (kind === "email") {
+    return ["Génère la relance J+7", "Génère la version néerlandaise"];
+  }
+  if (kind === "veille") {
+    return [
+      "Suggère un diffuseur prioritaire à prospecter sur ce marché",
+      "Donne-moi l'angle email à privilégier",
+    ];
+  }
+  return ["prospect RTBF", "veille VRM"];
+}
+
 export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
+
+  /* Auto-save fiches whenever a non-streaming agent message looks like a fiche. */
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "agent" || last.streaming) return;
+    if (!detectFiche(last.content)) return;
+    const broadcaster = extractBroadcasterFromFiche(last.content);
+    if (!broadcaster) return;
+    saveFiche(broadcaster, last.content);
+  }, [messages]);
+
+  /* Listen for "show this saved fiche" events from the sidebar. */
+  useEffect(() => {
+    function onShow(e: Event) {
+      const detail = (e as CustomEvent<{ broadcaster: string; content: string }>).detail;
+      if (!detail) return;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: newId(),
+          role: "agent",
+          content: `📁 **Fiche sauvegardée — ${detail.broadcaster}**\n\n${detail.content}`,
+        },
+      ]);
+    }
+    window.addEventListener("fiche:show", onShow);
+    return () => window.removeEventListener("fiche:show", onShow);
+  }, []);
+
+  const dynamicSuggestions = useMemo(() => {
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "agent" || last.streaming) return [];
+    if (!last.content.trim()) return [];
+    return buildDynamicSuggestions(last.content);
+  }, [messages]);
 
   function pushUser(text: string) {
     setMessages((prev) => [...prev, { id: newId(), role: "user", content: text }]);
@@ -59,7 +157,6 @@ export default function Home() {
       return;
     }
 
-    // Conversational LLM call — send last 10 turns as history.
     setBusy(true);
     const history = toHistory(messages);
     const agentId = newId();
@@ -137,7 +234,11 @@ export default function Home() {
             Groq · Llama 3.3 70B
           </span>
         </header>
-        <ChatWindow messages={messages} onSuggestion={handleSend} />
+        <ChatWindow
+          messages={messages}
+          onSuggestion={handleSend}
+          dynamicSuggestions={dynamicSuggestions}
+        />
         <CommandInput onSend={handleSend} disabled={busy} />
       </main>
       <CrmPanel />

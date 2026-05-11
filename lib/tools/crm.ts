@@ -8,7 +8,45 @@ export type CrmEntry = {
 };
 
 const KEY = "datarouter_crm_v1";
+const FICHE_KEY = "datarouter_fiches_v1";
 const STATUSES: CrmStatus[] = ["Cold", "Contacté", "En discussion", "Deal", "Perdu"];
+
+export type FicheEntry = {
+  broadcaster: string;
+  content: string;
+  savedAt: string;
+};
+
+export function getFiches(): FicheEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(FICHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as FicheEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveFiche(broadcaster: string, content: string): FicheEntry {
+  const list = getFiches();
+  const entry: FicheEntry = {
+    broadcaster,
+    content,
+    savedAt: new Date().toISOString(),
+  };
+  const idx = list.findIndex(
+    (f) => f.broadcaster.toLowerCase() === broadcaster.toLowerCase(),
+  );
+  if (idx >= 0) list[idx] = entry;
+  else list.push(entry);
+  if (typeof window !== "undefined") {
+    localStorage.setItem(FICHE_KEY, JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent("fiches:updated"));
+  }
+  return entry;
+}
 
 export function isCrmStatus(s: string): s is CrmStatus {
   return (STATUSES as string[]).includes(s);
