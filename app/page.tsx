@@ -5,11 +5,21 @@ import { ChatWindow } from "@/components/ChatWindow";
 import { CommandInput } from "@/components/CommandInput";
 import { CrmPanel } from "@/components/CrmPanel";
 import { ChatMessage } from "@/components/MessageBubble";
-import { parseCommand } from "@/lib/agent";
+import { detectCrmIntent, ChatTurn } from "@/lib/agent";
 import { isCrmStatus, loadCrm, renderCrmMarkdown, upsertEntry } from "@/lib/tools/crm";
 
 function newId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function toHistory(messages: ChatMessage[]): ChatTurn[] {
+  return messages
+    .filter((m) => m.content.trim().length > 0)
+    .map((m) => ({
+      role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+      content: m.content,
+    }))
+    .slice(-10);
 }
 
 export default function Home() {
@@ -28,34 +38,30 @@ export default function Home() {
     if (busy) return;
     pushUser(input);
 
-    const cmd = parseCommand(input);
+    const crm = detectCrmIntent(input);
 
-    if (cmd.kind === "error") {
-      pushAgent(`❌ ${cmd.message}`);
-      return;
-    }
-
-    if (cmd.kind === "crm") {
+    if (crm?.kind === "crm") {
       pushAgent(renderCrmMarkdown(loadCrm()));
       return;
     }
 
-    if (cmd.kind === "crm_update") {
-      if (!isCrmStatus(cmd.statut)) {
+    if (crm?.kind === "crm_update") {
+      if (!isCrmStatus(crm.statut)) {
         pushAgent(
-          `❌ Statut invalide : **${cmd.statut}**. Valeurs : Cold, Contacté, En discussion, Deal, Perdu.`,
+          `❌ Statut invalide : **${crm.statut}**. Valeurs : Cold, Contacté, En discussion, Deal, Perdu.`,
         );
         return;
       }
-      const entry = upsertEntry(cmd.diffuseur, cmd.statut, cmd.nextStep);
+      const entry = upsertEntry(crm.diffuseur, crm.statut, crm.nextStep);
       pushAgent(
         `✅ CRM mis à jour\n\n- **Diffuseur :** ${entry.diffuseur}\n- **Statut :** ${entry.statut}\n- **Next step :** ${entry.nextStep}`,
       );
       return;
     }
 
-    // Streaming LLM call
+    // Conversational LLM call — send last 10 turns as history.
     setBusy(true);
+    const history = toHistory(messages);
     const agentId = newId();
     setMessages((prev) => [
       ...prev,
@@ -66,7 +72,7 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({ message: input, history }),
       });
 
       if (!res.ok || !res.body) {

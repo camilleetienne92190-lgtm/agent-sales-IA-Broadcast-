@@ -1,32 +1,11 @@
 import { researchMulti, formatResultsForContext } from "./tools/researcher";
-import {
-  buildProspectPrompt,
-  buildScorePrompt,
-  buildResearchPrompt,
-  buildVeillePrompt,
-} from "./tools/prospector";
-import {
-  buildEmailUserPrompt,
-  buildSequenceUserPrompts,
-  EmailStage,
-} from "./tools/emailWriter";
 import { SYSTEM_PROMPT } from "./prompts/system";
 
-export type ParsedCommand =
-  | { kind: "prospect"; diffuseur: string }
-  | { kind: "email"; diffuseur: string; nom: string; genre: "M" | "F"; persona: string; langue: "FR" | "NL"; stage: EmailStage }
-  | { kind: "sequence"; diffuseur: string; nom: string; genre: "M" | "F"; persona: string; langue: "FR" | "NL" }
-  | { kind: "research"; query: string }
-  | { kind: "veille"; marche: string }
-  | { kind: "score"; diffuseur: string }
-  | { kind: "crm" }
-  | { kind: "crm_update"; diffuseur: string; statut: string; nextStep: string }
-  | { kind: "free"; text: string }
-  | { kind: "error"; message: string };
+export type ChatTurn = { role: "user" | "assistant"; content: string };
 
-function stripAccents(s: string) {
-  return s.normalize("NFD").replace(/[̀-ͯ]/g, "");
-}
+export type CrmIntent =
+  | { kind: "crm" }
+  | { kind: "crm_update"; diffuseur: string; statut: string; nextStep: string };
 
 function tokenize(input: string): string[] {
   const out: string[] = [];
@@ -36,218 +15,164 @@ function tokenize(input: string): string[] {
   return out;
 }
 
-export function parseCommand(raw: string): ParsedCommand {
+/**
+ * Detect CRM-only commands that must be handled client-side (localStorage).
+ * Returns null if the message is conversational (everything else).
+ */
+export function detectCrmIntent(raw: string): CrmIntent | null {
   const trimmed = raw.trim();
-  if (!trimmed) return { kind: "error", message: "Commande vide." };
-
-  const first = stripAccents(trimmed.split(/\s+/)[0]!.toLowerCase());
+  if (!trimmed) return null;
   const tokens = tokenize(trimmed);
-
-  // crm update [diffuseur] [statut] [next step]
-  if (first === "crm" && tokens[1]?.toLowerCase() === "update") {
+  const first = tokens[0]?.toLowerCase();
+  if (first !== "crm") return null;
+  if (tokens.length === 1) return { kind: "crm" };
+  if (tokens[1]?.toLowerCase() === "update") {
     if (tokens.length < 5) {
-      return {
-        kind: "error",
-        message:
-          'Usage : `crm update "Diffuseur" "Statut" "Next step"` — statuts : Cold, Contacté, En discussion, Deal, Perdu.',
-      };
+      // Treat malformed crm update as conversational so the LLM can guide the user.
+      return null;
     }
-    const diffuseur = tokens[2]!;
-    const statut = tokens[3]!;
-    const nextStep = tokens.slice(4).join(" ");
-    return { kind: "crm_update", diffuseur, statut, nextStep };
+    return {
+      kind: "crm_update",
+      diffuseur: tokens[2]!,
+      statut: tokens[3]!,
+      nextStep: tokens.slice(4).join(" "),
+    };
   }
+  return null;
+}
 
-  if (first === "crm") return { kind: "crm" };
+/* ---------- Entity detection ---------- */
 
-  if (first === "prospect") {
-    const diffuseur = tokens.slice(1).join(" ");
-    if (!diffuseur) return { kind: "error", message: "Usage : `prospect [diffuseur]`" };
-    return { kind: "prospect", diffuseur };
-  }
+const BROADCASTERS: string[] = [
+  "RTBF",
+  "RTL Belgium",
+  "BX1",
+  "Télé MB",
+  "Tele MB",
+  "TV Lux",
+  "RTC Liège",
+  "RTC Liege",
+  "VRT",
+  "Sporza",
+  "VTM",
+  "DPG Media NL",
+  "DPG Media",
+  "TVL",
+  "WTV",
+  "ROBtv",
+  "NPO",
+  "RTL Nederland",
+  "Talpa",
+  "BFM Régions",
+  "BFM Regions",
+  "BFM",
+];
 
-  if (first === "score") {
-    const diffuseur = tokens.slice(1).join(" ");
-    if (!diffuseur) return { kind: "error", message: "Usage : `score [diffuseur]`" };
-    return { kind: "score", diffuseur };
-  }
+const MARKETS: string[] = [
+  "CSA",
+  "VRM",
+  "Mediakabel",
+  "ARCOM",
+  "Belgique FR",
+  "Belgique FL",
+  "Belgique",
+  "Wallonie",
+  "Flandre",
+  "flamand",
+  "Pays-Bas",
+  "Pays Bas",
+  "Nederland",
+  "France",
+];
 
-  if (first === "recherche" || first === "research") {
-    const q = tokens.slice(1).join(" ");
-    if (!q) return { kind: "error", message: "Usage : `recherche [diffuseur ou marché]`" };
-    return { kind: "research", query: q };
-  }
-
-  if (first === "veille") {
-    const m = tokens.slice(1).join(" ");
-    if (!m) return { kind: "error", message: "Usage : `veille [marché]` (CSA, VRM, Mediakabel, ARCOM...)" };
-    return { kind: "veille", marche: m };
-  }
-
-  if (first === "email") {
-    // email [diffuseur] [Nom] [M/F] [persona] [FR/NL] [stage]
-    if (tokens.length < 7) {
-      return {
-        kind: "error",
-        message:
-          'Usage : `email [diffuseur] [Nom] [M|F] [persona] [FR|NL] [cold|followup_7|followup_14|breakup]`',
-      };
+function dedupSubstrings(matches: string[]): string[] {
+  const sorted = [...matches].sort((a, b) => b.length - a.length);
+  const kept: string[] = [];
+  for (const m of sorted) {
+    if (!kept.some((k) => k.toLowerCase().includes(m.toLowerCase()))) {
+      kept.push(m);
     }
-    const [, diffuseur, nom, genreRaw, persona, langueRaw, stageRaw] = tokens;
-    const genre = (genreRaw!.toUpperCase() === "F" ? "F" : "M") as "M" | "F";
-    const langue = (langueRaw!.toUpperCase() === "NL" ? "NL" : "FR") as "FR" | "NL";
-    const stage = stageRaw as EmailStage;
-    if (!["cold", "followup_7", "followup_14", "breakup"].includes(stage)) {
-      return {
-        kind: "error",
-        message: "Étape invalide. Valeurs : cold, followup_7, followup_14, breakup.",
-      };
-    }
-    return { kind: "email", diffuseur: diffuseur!, nom: nom!, genre, persona: persona!, langue, stage };
   }
+  return kept;
+}
 
-  if (first === "sequence" || first === "séquence") {
-    if (tokens.length < 6) {
-      return {
-        kind: "error",
-        message: "Usage : `séquence [diffuseur] [Nom] [M|F] [persona] [FR|NL]`",
-      };
-    }
-    const [, diffuseur, nom, genreRaw, persona, langueRaw] = tokens;
-    const genre = (genreRaw!.toUpperCase() === "F" ? "F" : "M") as "M" | "F";
-    const langue = (langueRaw!.toUpperCase() === "NL" ? "NL" : "FR") as "FR" | "NL";
-    return { kind: "sequence", diffuseur: diffuseur!, nom: nom!, genre, persona: persona!, langue };
+function findMatches(text: string, dict: string[]): string[] {
+  const lower = text.toLowerCase();
+  const hits = dict.filter((x) => lower.includes(x.toLowerCase()));
+  return dedupSubstrings(hits);
+}
+
+export function detectEntities(text: string): {
+  broadcasters: string[];
+  markets: string[];
+} {
+  return {
+    broadcasters: findMatches(text, BROADCASTERS),
+    markets: findMatches(text, MARKETS),
+  };
+}
+
+/* ---------- Conversational request builder ---------- */
+
+function buildResearchQueries(entities: {
+  broadcasters: string[];
+  markets: string[];
+}): string[] {
+  const queries: string[] = [];
+  for (const b of entities.broadcasters.slice(0, 2)) {
+    queries.push(`${b} chaîne TV broadcaster actualité`);
+    queries.push(`${b} sous-titrage direct accessibilité`);
+    queries.push(`${b} CTO directeur technique`);
   }
-
-  return { kind: "free", text: trimmed };
+  for (const m of entities.markets.slice(0, 1)) {
+    if (!queries.some((q) => q.toLowerCase().includes(m.toLowerCase()))) {
+      queries.push(`${m} obligation sous-titrage direct broadcast`);
+      queries.push(`${m} accessibilité TV régulateur ${new Date().getFullYear()}`);
+    }
+  }
+  return queries.slice(0, 6);
 }
 
 /**
- * Prepare a Groq-ready { system, user } pair for any command that needs the LLM.
- * Performs web research when relevant.
+ * Build the Groq payload for any conversational user message.
+ * - Detects broadcasters / markets and injects fresh web context when found.
+ * - Carries the last N turns of conversation history (already trimmed by the caller).
  */
-export async function buildLlmRequest(cmd: ParsedCommand): Promise<{
-  system: string;
-  user: string;
-} | null> {
-  if (cmd.kind === "crm" || cmd.kind === "crm_update" || cmd.kind === "error") return null;
+export async function buildConversationalRequest(
+  userMessage: string,
+  history: ChatTurn[],
+): Promise<{ system: string; messages: ChatTurn[] }> {
+  const entities = detectEntities(userMessage);
+  let webBlock = "";
 
-  if (cmd.kind === "prospect") {
-    const results = await researchMulti(
-      [
-        `${cmd.diffuseur} chaîne TV diffuseur`,
-        `${cmd.diffuseur} sous-titrage direct accessibilité`,
-        `${cmd.diffuseur} CTO directeur technique broadcast`,
-      ],
-      4,
-    );
-    return {
-      system: SYSTEM_PROMPT,
-      user: buildProspectPrompt(cmd.diffuseur, formatResultsForContext(results)),
-    };
+  if (entities.broadcasters.length > 0 || entities.markets.length > 0) {
+    const queries = buildResearchQueries(entities);
+    try {
+      const results = await researchMulti(queries, 4);
+      if (results.length > 0) {
+        const labelParts: string[] = [];
+        if (entities.broadcasters.length) {
+          labelParts.push(`diffuseurs : ${entities.broadcasters.join(", ")}`);
+        }
+        if (entities.markets.length) {
+          labelParts.push(`marchés : ${entities.markets.join(", ")}`);
+        }
+        webBlock =
+          `\n\n[CONTEXTE WEB RÉCENT — ${labelParts.join(" | ")}]\n` +
+          formatResultsForContext(results) +
+          `\n[/CONTEXTE WEB]`;
+      }
+    } catch {
+      // research failure is non-fatal — continue without web context
+    }
   }
 
-  if (cmd.kind === "score") {
-    const results = await researchMulti(
-      [
-        `${cmd.diffuseur} programmation live volume`,
-        `${cmd.diffuseur} obligation sous-titrage régulateur`,
-        `${cmd.diffuseur} directeur technologique broadcast`,
-      ],
-      3,
-    );
-    return {
-      system: SYSTEM_PROMPT,
-      user: buildScorePrompt(cmd.diffuseur, formatResultsForContext(results)),
-    };
-  }
+  const augmentedUser = webBlock ? `${userMessage}${webBlock}` : userMessage;
 
-  if (cmd.kind === "research") {
-    const results = await researchMulti(
-      [
-        cmd.query,
-        `${cmd.query} broadcast TV`,
-        `${cmd.query} sous-titrage accessibilité réglementation`,
-      ],
-      4,
-    );
-    return {
-      system: SYSTEM_PROMPT,
-      user: buildResearchPrompt(cmd.query, formatResultsForContext(results)),
-    };
-  }
+  const messages: ChatTurn[] = [
+    ...history.slice(-10),
+    { role: "user", content: augmentedUser },
+  ];
 
-  if (cmd.kind === "veille") {
-    const results = await researchMulti(
-      [
-        `${cmd.marche} sous-titrage direct obligation broadcast`,
-        `${cmd.marche} accessibilité TV régulateur ${new Date().getFullYear()}`,
-        `${cmd.marche} CSA VRM Mediakabel ARCOM décision`,
-      ],
-      4,
-    );
-    return {
-      system: SYSTEM_PROMPT,
-      user: buildVeillePrompt(cmd.marche, formatResultsForContext(results)),
-    };
-  }
-
-  if (cmd.kind === "email") {
-    const results = await researchMulti(
-      [
-        `${cmd.diffuseur} actualité ${new Date().getFullYear()}`,
-        `${cmd.diffuseur} sous-titrage direct`,
-      ],
-      3,
-    );
-    return {
-      system: SYSTEM_PROMPT,
-      user: buildEmailUserPrompt({
-        diffuseur: cmd.diffuseur,
-        nom: cmd.nom,
-        genre: cmd.genre,
-        persona: cmd.persona,
-        langue: cmd.langue,
-        stage: cmd.stage,
-        webContext: formatResultsForContext(results),
-      }),
-    };
-  }
-
-  if (cmd.kind === "sequence") {
-    const results = await researchMulti(
-      [
-        `${cmd.diffuseur} actualité ${new Date().getFullYear()}`,
-        `${cmd.diffuseur} sous-titrage accessibilité`,
-      ],
-      3,
-    );
-    const ctx = formatResultsForContext(results);
-    const prompts = buildSequenceUserPrompts(
-      {
-        diffuseur: cmd.diffuseur,
-        nom: cmd.nom,
-        genre: cmd.genre,
-        persona: cmd.persona,
-        langue: cmd.langue,
-      },
-      ctx,
-    );
-    const joined = prompts
-      .map(
-        (p, i) =>
-          `### Email ${i + 1} — étape : ${p.stage}\n\n${p.prompt}\n\n---`,
-      )
-      .join("\n\n");
-    return {
-      system: SYSTEM_PROMPT,
-      user: `Génère LES 4 EMAILS d'une séquence de prospection pour ${cmd.diffuseur} / ${cmd.nom}.
-
-Pour chaque email, respecte STRICTEMENT son brief individuel ci-dessous. Sépare clairement chaque email par un titre markdown \`## Email N — [stage]\`.
-
-${joined}`,
-    };
-  }
-
-  return null;
+  return { system: SYSTEM_PROMPT, messages };
 }
