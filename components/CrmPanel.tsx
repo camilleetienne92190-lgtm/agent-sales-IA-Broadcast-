@@ -18,12 +18,6 @@ const MARKETS: { label: string; flag: string }[] = [
   { label: "France", flag: "🇫🇷" },
 ];
 
-function selectMarket(label: string) {
-  window.dispatchEvent(
-    new CustomEvent("market:selected", { detail: { market: label } }),
-  );
-}
-
 const STATUS_COLOR: Record<CrmStatus, string> = {
   Cold: "text-slate-300",
   Contacté: "text-blue-300",
@@ -31,6 +25,38 @@ const STATUS_COLOR: Record<CrmStatus, string> = {
   Deal: "text-green-300",
   Perdu: "text-red-300",
 };
+
+function dispatchMarket(label: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("market:selected", { detail: { market: label } }),
+  );
+}
+
+function MarketShortcuts() {
+  return (
+    <section className="shrink-0 border-b border-border bg-bg px-6 py-5">
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
+        Marchés
+      </h2>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {MARKETS.map((m) => (
+          <button
+            key={m.label}
+            type="button"
+            onClick={() => dispatchMarket(m.label)}
+            className="flex items-center gap-2 rounded-lg border border-border bg-panel px-3 py-2 text-left text-xs font-medium text-white/90 transition hover:border-accent hover:bg-panel/70 hover:text-white"
+          >
+            <span aria-hidden className="text-base leading-none">
+              {m.flag}
+            </span>
+            <span>{m.label}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 export function CrmPanel() {
   const [entries, setEntries] = useState<CrmEntry[]>([]);
@@ -65,29 +91,17 @@ export function CrmPanel() {
 
   function showFiche(f: FicheEntry) {
     window.dispatchEvent(
-      new CustomEvent("fiche:show", { detail: { broadcaster: f.broadcaster, content: f.content } }),
+      new CustomEvent("fiche:show", {
+        detail: { broadcaster: f.broadcaster, content: f.content },
+      }),
     );
   }
 
   return (
     <aside className="hidden h-full w-[30%] flex-col border-l border-border bg-bg lg:flex">
-      <div className="px-6 pb-2 pt-5">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
-          Marchés
-        </h2>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          {MARKETS.map((m) => (
-            <button
-              key={m.label}
-              onClick={() => selectMarket(m.label)}
-              className="rounded-lg border border-border bg-panel px-3 py-2 text-left text-xs text-white/85 transition hover:border-accent hover:text-white"
-            >
-              <span className="mr-1">{m.flag}</span> {m.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="border-t border-border px-6 pb-2 pt-5">
+      <MarketShortcuts />
+
+      <div className="shrink-0 px-6 pb-2 pt-5">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
           Pipeline CRM
         </h2>
@@ -95,10 +109,13 @@ export function CrmPanel() {
           {entries.length} prospect{entries.length !== 1 ? "s" : ""} · stocké localement
         </p>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 pb-6 pt-3">
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3">
         {STATUSES.map((s) => (
           <div key={s} className="mb-5">
-            <div className={`mb-2 text-xs font-medium uppercase tracking-wider ${STATUS_COLOR[s]}`}>
+            <div
+              className={`mb-2 text-xs font-medium uppercase tracking-wider ${STATUS_COLOR[s]}`}
+            >
               {s} · {grouped[s].length}
             </div>
             {grouped[s].length === 0 ? (
@@ -143,6 +160,7 @@ export function CrmPanel() {
                   return (
                     <li key={f.broadcaster + f.savedAt}>
                       <button
+                        type="button"
                         onClick={() => showFiche(f)}
                         className="w-full rounded-lg bg-panel px-3 py-2 text-left text-sm transition hover:bg-panel/60"
                       >
