@@ -2,8 +2,10 @@ import { NextRequest } from "next/server";
 import {
   buildConversationalRequest,
   detectCrmIntent,
+  isPptxIntent,
   ChatTurn,
 } from "@/lib/agent";
+import { runPptxFlow } from "@/lib/agent.server";
 import { updateMemory } from "@/lib/session";
 // Apollo lives behind buildConversationalRequest and is invoked non-blockingly;
 // importing the module here keeps it bundled with the route for clarity.
@@ -58,6 +60,32 @@ export async function POST(req: NextRequest) {
   }
 
   const history = sanitizeHistory(body.history);
+
+  // PPTX flow — non-streaming, returns JSON with base64 attachment.
+  if (isPptxIntent(message)) {
+    const result = await runPptxFlow(apiKey, message, history);
+    if (result.ok) {
+      try {
+        updateMemory(message, result.messageText);
+      } catch {
+        // best-effort
+      }
+      return Response.json({
+        kind: "pptx",
+        message: result.messageText,
+        pptxData: result.pptxData,
+        filename: result.filename,
+        slideCount: result.slideCount,
+        audience: result.audience,
+        tone: result.tone,
+      });
+    }
+    return Response.json(
+      { kind: "error", message: `❌ ${result.error}` },
+      { status: 200 },
+    );
+  }
+
   const { system, messages } = await buildConversationalRequest(message, history);
 
   const upstream = await fetch(GROQ_URL, {

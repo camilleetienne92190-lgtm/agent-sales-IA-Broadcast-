@@ -7,11 +7,20 @@ import { BROADCASTERS } from "@/lib/entities";
 
 export type ChatRole = "user" | "agent";
 
+export type PptxAttachment = {
+  data: string;
+  filename: string;
+  slideCount: number;
+  audience: string;
+  tone: string;
+};
+
 export type ChatMessage = {
   id: string;
   role: ChatRole;
   content: string;
   streaming?: boolean;
+  pptx?: PptxAttachment;
 };
 
 type ApolloContact = {
@@ -187,6 +196,29 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
 
   const showActions = !isUser && !message.streaming && (isFiche || isEmail);
 
+  function downloadPptx() {
+    if (!message.pptx) return;
+    try {
+      const bin = atob(message.pptx.data);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], {
+        type:
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = message.pptx.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("PPTX download failed", e);
+    }
+  }
+
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} w-full`}>
       <div
@@ -233,6 +265,22 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                 >
                   {exporting ? "Export…" : "📄 Exporter PDF"}
                 </button>
+              </div>
+            )}
+
+            {message.pptx && !message.streaming && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={downloadPptx}
+                  className="inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white transition hover:bg-accentHover"
+                >
+                  ⬇ Télécharger {message.pptx.filename}
+                </button>
+                <div className="mt-1.5 text-xs text-muted">
+                  {message.pptx.slideCount} slides · {message.pptx.audience} ·{" "}
+                  {message.pptx.tone}
+                </div>
               </div>
             )}
 

@@ -43,6 +43,14 @@ export function detectCrmIntent(raw: string): CrmIntent | null {
   return null;
 }
 
+/* ---------- PPTX intent ---------- */
+
+const PPT_INTENT_RE = /\b(decks?|ppt|pptx|powerpoint|pr[ée]sentation|slides?|pitch)\b/i;
+
+export function isPptxIntent(text: string): boolean {
+  return PPT_INTENT_RE.test(text);
+}
+
 /* ---------- Triggers ---------- */
 
 const CONTACT_INTENT_RE =

@@ -58,23 +58,34 @@ function classifyAgent(content: string):
   return "other";
 }
 
+const DECK_GENERATED_RE = /Deck g[ée]n[ée]r[ée]/i;
+
 function buildDynamicSuggestions(content: string): string[] {
   const kind = classifyAgent(content);
+  if (DECK_GENERATED_RE.test(content)) {
+    return ["Exporte la fiche prospect en slide", "Génère un deck de campagne outreach"];
+  }
   if (kind === "fiche") {
     const b = extractBroadcasterFromFiche(content) ?? "ce diffuseur";
     return [
       `Génère l'email cold pour ${b}`,
       `crm update "${b}" Cold "À contacter"`,
+      `Génère un deck de prospection pour ${b}`,
     ];
   }
   if (kind === "cold_email") {
     return [
       "Génère la séquence complète des 4 emails",
       "Génère la relance J+7",
+      "Crée un deck de campagne outreach",
     ];
   }
   if (kind === "email") {
-    return ["Génère la relance J+7", "Génère la version néerlandaise"];
+    return [
+      "Génère la relance J+7",
+      "Génère la version néerlandaise",
+      "Crée un deck de campagne outreach",
+    ];
   }
   if (kind === "veille") {
     return [
@@ -195,6 +206,44 @@ export default function Home() {
               : m,
           ),
         );
+        return;
+      }
+
+      const contentType = res.headers.get("content-type") ?? "";
+      if (contentType.includes("application/json")) {
+        const data = await res.json().catch(() => null);
+        if (data?.kind === "pptx") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === agentId
+                ? {
+                    ...m,
+                    content: data.message ?? "Deck généré ✓",
+                    streaming: false,
+                    pptx: {
+                      data: data.pptxData,
+                      filename: data.filename,
+                      slideCount: data.slideCount,
+                      audience: data.audience,
+                      tone: data.tone,
+                    },
+                  }
+                : m,
+            ),
+          );
+        } else {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === agentId
+                ? {
+                    ...m,
+                    content: data?.message ?? "❌ Erreur inconnue",
+                    streaming: false,
+                  }
+                : m,
+            ),
+          );
+        }
         return;
       }
 
