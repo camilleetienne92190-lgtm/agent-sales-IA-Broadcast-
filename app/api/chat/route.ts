@@ -4,6 +4,10 @@ import {
   detectCrmIntent,
   ChatTurn,
 } from "@/lib/agent";
+import { updateMemory } from "@/lib/session";
+// Apollo lives behind buildConversationalRequest and is invoked non-blockingly;
+// importing the module here keeps it bundled with the route for clarity.
+import "@/lib/tools/apollo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,6 +89,7 @@ export async function POST(req: NextRequest) {
       const decoder = new TextDecoder();
       const encoder = new TextEncoder();
       let buf = "";
+      let full = "";
       try {
         while (true) {
           const { value, done } = await reader.read();
@@ -100,7 +105,10 @@ export async function POST(req: NextRequest) {
             try {
               const json = JSON.parse(data);
               const delta = json.choices?.[0]?.delta?.content;
-              if (delta) controller.enqueue(encoder.encode(delta));
+              if (delta) {
+                full += delta;
+                controller.enqueue(encoder.encode(delta));
+              }
             } catch {
               // ignore malformed chunks
             }
@@ -113,6 +121,11 @@ export async function POST(req: NextRequest) {
           ),
         );
       } finally {
+        try {
+          if (full) updateMemory(message, full);
+        } catch {
+          // memory update is best-effort
+        }
         controller.close();
       }
     },

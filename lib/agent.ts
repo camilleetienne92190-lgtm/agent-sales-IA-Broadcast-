@@ -1,5 +1,14 @@
 import { researchMulti, formatResultsForContext } from "./tools/researcher";
+import {
+  searchPeople,
+  formatContactsForContext,
+  DEFAULT_DECISION_MAKER_TITLES,
+} from "./tools/apollo";
 import { SYSTEM_PROMPT } from "./prompts/system";
+import { detectEntities } from "./entities";
+import { getMemoryContext } from "./session";
+
+export { detectEntities } from "./entities";
 
 export type ChatTurn = { role: "user" | "assistant"; content: string };
 
@@ -15,10 +24,6 @@ function tokenize(input: string): string[] {
   return out;
 }
 
-/**
- * Detect CRM-only commands that must be handled client-side (localStorage).
- * Returns null if the message is conversational (everything else).
- */
 export function detectCrmIntent(raw: string): CrmIntent | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
@@ -27,10 +32,7 @@ export function detectCrmIntent(raw: string): CrmIntent | null {
   if (first !== "crm") return null;
   if (tokens.length === 1) return { kind: "crm" };
   if (tokens[1]?.toLowerCase() === "update") {
-    if (tokens.length < 5) {
-      // Treat malformed crm update as conversational so the LLM can guide the user.
-      return null;
-    }
+    if (tokens.length < 5) return null;
     return {
       kind: "crm_update",
       diffuseur: tokens[2]!,
@@ -41,78 +43,10 @@ export function detectCrmIntent(raw: string): CrmIntent | null {
   return null;
 }
 
-/* ---------- Entity detection ---------- */
+/* ---------- Triggers ---------- */
 
-const BROADCASTERS: string[] = [
-  "RTBF",
-  "RTL Belgium",
-  "BX1",
-  "Télé MB",
-  "Tele MB",
-  "TV Lux",
-  "RTC Liège",
-  "RTC Liege",
-  "VRT",
-  "Sporza",
-  "VTM",
-  "DPG Media NL",
-  "DPG Media",
-  "TVL",
-  "WTV",
-  "ROBtv",
-  "NPO",
-  "RTL Nederland",
-  "Talpa",
-  "BFM Régions",
-  "BFM Regions",
-  "BFM",
-];
-
-const MARKETS: string[] = [
-  "CSA",
-  "VRM",
-  "Mediakabel",
-  "ARCOM",
-  "Belgique FR",
-  "Belgique FL",
-  "Belgique",
-  "Wallonie",
-  "Flandre",
-  "flamand",
-  "Pays-Bas",
-  "Pays Bas",
-  "Nederland",
-  "France",
-];
-
-function dedupSubstrings(matches: string[]): string[] {
-  const sorted = [...matches].sort((a, b) => b.length - a.length);
-  const kept: string[] = [];
-  for (const m of sorted) {
-    if (!kept.some((k) => k.toLowerCase().includes(m.toLowerCase()))) {
-      kept.push(m);
-    }
-  }
-  return kept;
-}
-
-function findMatches(text: string, dict: string[]): string[] {
-  const lower = text.toLowerCase();
-  const hits = dict.filter((x) => lower.includes(x.toLowerCase()));
-  return dedupSubstrings(hits);
-}
-
-export function detectEntities(text: string): {
-  broadcasters: string[];
-  markets: string[];
-} {
-  return {
-    broadcasters: findMatches(text, BROADCASTERS),
-    markets: findMatches(text, MARKETS),
-  };
-}
-
-/* ---------- Conversational request builder ---------- */
+const CONTACT_INTENT_RE =
+  /\b(contact|contacts|décideur|decideur|d[ée]cideurs|CTO|email|e-mail|courriel|LinkedIn|directeur technique|directrice technique|head of|VP|responsable accessibilit|chief technology)/i;
 
 function buildResearchQueries(entities: {
   broadcasters: string[];
@@ -135,16 +69,19 @@ function buildResearchQueries(entities: {
 
 /**
  * Build the Groq payload for any conversational user message.
- * - Detects broadcasters / markets and injects fresh web context when found.
- * - Carries the last N turns of conversation history (already trimmed by the caller).
+ * - Detects broadcasters / markets and injects fresh web context.
+ * - Triggers Apollo people search when contact-related keywords are present.
+ * - Injects session memory so the model can reference prior turns in this session.
+ * - Carries the last N turns of conversation history.
  */
 export async function buildConversationalRequest(
   userMessage: string,
   history: ChatTurn[],
 ): Promise<{ system: string; messages: ChatTurn[] }> {
   const entities = detectEntities(userMessage);
-  let webBlock = "";
+  const contextBlocks: string[] = [];
 
+  // Web research
   if (entities.broadcasters.length > 0 || entities.markets.length > 0) {
     const queries = buildResearchQueries(entities);
     try {
@@ -157,17 +94,43 @@ export async function buildConversationalRequest(
         if (entities.markets.length) {
           labelParts.push(`marchés : ${entities.markets.join(", ")}`);
         }
-        webBlock =
-          `\n\n[CONTEXTE WEB RÉCENT — ${labelParts.join(" | ")}]\n` +
-          formatResultsForContext(results) +
-          `\n[/CONTEXTE WEB]`;
+        contextBlocks.push(
+          `[CONTEXTE WEB RÉCENT — ${labelParts.join(" | ")}]\n` +
+            formatResultsForContext(results) +
+            `\n[/CONTEXTE WEB]`,
+        );
       }
     } catch {
-      // research failure is non-fatal — continue without web context
+      // research failure is non-fatal
     }
   }
 
-  const augmentedUser = webBlock ? `${userMessage}${webBlock}` : userMessage;
+  // Apollo enrichment — only when a broadcaster is in scope AND the user asked
+  // for contact-level info. Non-blocking : a failure leaves contextBlocks alone.
+  if (entities.broadcasters.length > 0 && CONTACT_INTENT_RE.test(userMessage)) {
+    try {
+      const company = entities.broadcasters[0]!;
+      const contacts = await searchPeople(company, DEFAULT_DECISION_MAKER_TITLES);
+      if (contacts.length > 0) {
+        contextBlocks.push(
+          `[APOLLO — décideurs trouvés chez ${company}]\n` +
+            formatContactsForContext(contacts) +
+            `\n[/APOLLO]`,
+        );
+      }
+    } catch {
+      // apollo failure is non-fatal
+    }
+  }
+
+  // Session memory
+  const mem = getMemoryContext();
+  if (mem) contextBlocks.push(mem);
+
+  const augmentedUser =
+    contextBlocks.length > 0
+      ? `${userMessage}\n\n${contextBlocks.join("\n\n")}`
+      : userMessage;
 
   const messages: ChatTurn[] = [
     ...history.slice(-10),
