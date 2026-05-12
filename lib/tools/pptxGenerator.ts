@@ -96,21 +96,19 @@ function addTitle(slide: pptxgen.Slide, title: string, palette: Palette, size = 
 /* ---------- Renderers (new content shapes) ---------- */
 
 function renderCover(slide: pptxgen.Slide, slidePlan: SlidePlan, plan: DeckPlan, palette: Palette, accent: string) {
-  // bg already set to palette.bg (dark forced for cover)
-  // Accent strip bottom
+  // Bottom anchor strip at y=96%
   slide.addShape("rect", {
     x: 0,
-    y: H - 0.12,
+    y: H * 0.96,
     w: W,
-    h: 0.12,
+    h: H * 0.04,
     fill: { color: accent },
     line: { color: accent },
   });
 
-  // Title — 40pt blanc bold centré y=15% (~1.13")
   slide.addText(txt(plan.title, "Présentation"), {
     x: M,
-    y: H * 0.15,
+    y: H * 0.13,
     w: W - 2 * M,
     h: 1.6,
     fontFace: "Calibri",
@@ -121,27 +119,28 @@ function renderCover(slide: pptxgen.Slide, slidePlan: SlidePlan, plan: DeckPlan,
     valign: "middle",
   });
 
-  // Subtitle 16pt secondary y=30% (~2.25")
   const subtitle = txt(slidePlan.content?.subtitle) || txt(plan.subtitle);
   if (subtitle) {
+    const twoLines = subtitle.length > 60;
     slide.addText(subtitle, {
       x: M,
-      y: H * 0.30,
+      y: H * 0.28,
       w: W - 2 * M,
-      h: 0.8,
+      h: twoLines ? 1.2 : 0.7,
       fontFace: "Calibri",
       fontSize: 16,
       color: palette.secondary,
       align: "center",
+      valign: "top",
     });
   }
 
-  // Stats row y=55% (~4.13"), 3 columns
+  // Stats row — up to 5 columns
   const stats = arr<{ value?: unknown; label?: unknown }>(slidePlan.content?.stats);
   if (stats.length > 0) {
-    const n = Math.min(stats.length, 4);
+    const n = Math.min(stats.length, 5);
     const colW = (W - 2 * M) / n;
-    const sy = H * 0.55;
+    const sy = H * 0.50;
     for (let i = 0; i < n; i++) {
       const s = stats[i]!;
       const x = M + i * colW;
@@ -149,16 +148,17 @@ function renderCover(slide: pptxgen.Slide, slidePlan: SlidePlan, plan: DeckPlan,
         x,
         y: sy,
         w: colW,
-        h: 1.0,
+        h: 1.4,
         fontFace: "Calibri",
-        fontSize: 48,
+        fontSize: n >= 5 ? 42 : 48,
         bold: true,
         color: palette.text,
         align: "center",
+        valign: "middle",
       });
       slide.addText(txt(s.label), {
         x,
-        y: sy + 1.05,
+        y: sy + 1.45,
         w: colW,
         h: 0.5,
         fontFace: "Calibri",
@@ -169,12 +169,11 @@ function renderCover(slide: pptxgen.Slide, slidePlan: SlidePlan, plan: DeckPlan,
     }
   }
 
-  // Author y=88%
   const author = txt(plan.author);
   if (author) {
     slide.addText(author, {
       x: M,
-      y: H * 0.88,
+      y: H * 0.86,
       w: W - 2 * M,
       h: 0.4,
       fontFace: "Calibri",
@@ -186,7 +185,6 @@ function renderCover(slide: pptxgen.Slide, slidePlan: SlidePlan, plan: DeckPlan,
 }
 
 function renderSommaire(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palette, accent: string) {
-  // Title "SOMMAIRE"
   slide.addText("SOMMAIRE", {
     x: W * 0.08,
     y: H * 0.08,
@@ -197,7 +195,6 @@ function renderSommaire(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pal
     bold: true,
     color: palette.text,
   });
-  // Accent bar
   slide.addShape("rect", {
     x: W * 0.08,
     y: H * 0.18,
@@ -210,19 +207,24 @@ function renderSommaire(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pal
   const sections = arr<{ number?: unknown; title?: unknown; description?: unknown }>(
     slidePlan.content?.sections ?? slidePlan.content?.items,
   );
-  const startY = H * 0.28;
-  const availH = H - startY - M;
-  const rowH = sections.length > 0 ? Math.min(0.95, availH / sections.length) : 0.6;
+  if (sections.length === 0) return;
+
+  const startY = H * 0.26;
+  const endY = H - M - 0.2;
+  const availH = endY - startY;
+  const rowH = availH / sections.length;
 
   sections.forEach((s, i) => {
     const y = startY + i * rowH;
-    slide.addText(txt(s.number) || String(i + 1).padStart(2, "0"), {
+    const numText = txt(s.number) || String(i + 1).padStart(2, "0");
+
+    slide.addText(numText, {
       x: M,
       y,
       w: 1.0,
       h: rowH,
       fontFace: "Calibri",
-      fontSize: 22,
+      fontSize: 20,
       bold: true,
       color: accent,
       valign: "middle",
@@ -230,8 +232,8 @@ function renderSommaire(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pal
     slide.addText(txt(s.title), {
       x: M + 1.1,
       y,
-      w: W - 2 * M - 1.1,
-      h: rowH * 0.5,
+      w: 5.4,
+      h: rowH,
       fontFace: "Calibri",
       fontSize: 16,
       bold: true,
@@ -241,14 +243,15 @@ function renderSommaire(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pal
     const desc = txt(s.description);
     if (desc) {
       slide.addText(desc, {
-        x: M + 1.1,
-        y: y + rowH * 0.5,
-        w: W - 2 * M - 1.1,
-        h: rowH * 0.5,
+        x: M + 6.6,
+        y,
+        w: W - M - (M + 6.6),
+        h: rowH,
         fontFace: "Calibri",
         fontSize: 12,
         color: palette.secondary,
         italic: true,
+        valign: "middle",
       });
     }
   });
@@ -256,12 +259,35 @@ function renderSommaire(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pal
 
 function renderContexte(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palette, accent: string) {
   addTitle(slide, slidePlan.title || "Contexte", palette);
-  const market = slidePlan.content?.market ?? {};
-  const product = slidePlan.content?.product ?? slidePlan.content?.produit ?? {};
-  const colGap = 0.4;
-  const colW = (W - 2 * M - colGap) / 2;
 
-  function renderColumn(x: number, header: string, facts: string[]) {
+  // Prefer new shape: content.blocks = [{title, facts: [string]}]
+  const rawBlocks = arr<{ title?: unknown; facts?: unknown }>(slidePlan.content?.blocks);
+  let blocks: { title: string; facts: string[] }[] = rawBlocks.map((b) => ({
+    title: txt(b.title, "—"),
+    facts: strArr(b.facts),
+  }));
+
+  if (blocks.length === 0) {
+    const market = (slidePlan.content?.market ?? {}) as any;
+    const product = (slidePlan.content?.product ?? slidePlan.content?.produit ?? {}) as any;
+    blocks = [
+      {
+        title: txt(market.title, "Marché"),
+        facts: strArr(market.facts ?? slidePlan.content?.marche),
+      },
+      {
+        title: txt(product.title, "Produit"),
+        facts: strArr(product.facts ?? slidePlan.content?.produit),
+      },
+    ];
+  }
+
+  const n = Math.max(1, Math.min(3, blocks.length));
+  const colGap = 0.3;
+  const colW = (W - 2 * M - colGap * (n - 1)) / n;
+
+  blocks.slice(0, n).forEach((b, i) => {
+    const x = M + i * (colW + colGap);
     slide.addShape("rect", {
       x,
       y: CONTENT_Y,
@@ -270,54 +296,56 @@ function renderContexte(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pal
       fill: { color: palette.card },
       line: { color: palette.card },
     });
-    slide.addText(header, {
+    slide.addText(b.title, {
       x: x + 0.3,
       y: CONTENT_Y + 0.25,
       w: colW - 0.6,
       h: 0.5,
       fontFace: "Calibri",
-      fontSize: 16,
+      fontSize: 15,
       bold: true,
       color: accent,
     });
-    if (facts.length > 0) {
+    if (b.facts.length > 0) {
       slide.addText(
-        facts.map((f) => ({ text: f, options: { bullet: { code: "25CF" } } })),
+        b.facts.map((f) => `—  ${f}`).join("\n"),
         {
           x: x + 0.3,
           y: CONTENT_Y + 0.9,
           w: colW - 0.6,
           h: CONTENT_H - 1.1,
           fontFace: "Calibri",
-          fontSize: 13,
+          fontSize: 12,
           color: palette.text,
-          paraSpaceAfter: 8,
+          valign: "top",
+          paraSpaceAfter: 6,
         },
       );
     }
-  }
-
-  renderColumn(M, txt((market as any).title, "Marché"), strArr((market as any).facts ?? slidePlan.content?.marche));
-  renderColumn(
-    M + colW + colGap,
-    txt((product as any).title, "Produit"),
-    strArr((product as any).facts ?? slidePlan.content?.produit),
-  );
+  });
 }
 
 function renderObjectifs(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palette, accent: string) {
   addTitle(slide, slidePlan.title || "Objectifs", palette);
-  const items = arr<{ number?: unknown; label?: unknown; sublabel?: unknown; detail?: unknown }>(
+  const raw = arr<{ number?: unknown; label?: unknown; sublabel?: unknown; detail?: unknown }>(
     slidePlan.content?.items,
   ).slice(0, 4);
-  if (items.length === 0) return;
+  // Always 4 cards — pad with empty placeholders
+  const items: { number: string; label: string; sublabel: string }[] = [];
+  for (let i = 0; i < 4; i++) {
+    const it = raw[i];
+    items.push({
+      number: txt(it?.number) || String(i + 1).padStart(2, "0"),
+      label: txt(it?.label),
+      sublabel: txt(it?.sublabel) || txt(it?.detail),
+    });
+  }
 
-  // 2x2 grid (or 1x1, 1x2, etc.)
-  const cols = items.length <= 2 ? items.length : 2;
-  const rows = Math.ceil(items.length / cols);
+  const cols = 2;
+  const rows = 2;
   const gap = 0.3;
   const cardW = (W - 2 * M - gap * (cols - 1)) / cols;
-  const cardH = (CONTENT_H - gap * (rows - 1)) / Math.max(1, rows);
+  const cardH = (CONTENT_H - gap * (rows - 1)) / rows;
 
   items.forEach((it, i) => {
     const r = Math.floor(i / cols);
@@ -325,7 +353,6 @@ function renderObjectifs(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pa
     const x = M + c * (cardW + gap);
     const y = CONTENT_Y + r * (cardH + gap);
 
-    // Rounded rectangle with accent 20% opacity
     slide.addShape("roundRect", {
       x,
       y,
@@ -335,38 +362,36 @@ function renderObjectifs(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pa
       line: { color: accent, width: 1 },
       rectRadius: 0.15,
     });
-    // Number 32pt accent bold
-    slide.addText(txt(it.number) || String(i + 1), {
+    slide.addText(it.number, {
       x: x + 0.3,
       y: y + 0.25,
-      w: 1.5,
-      h: 0.8,
+      w: 1.8,
+      h: 0.9,
       fontFace: "Calibri",
-      fontSize: 32,
+      fontSize: 36,
       bold: true,
       color: accent,
     });
-    // Label 15pt bold
-    slide.addText(txt(it.label), {
-      x: x + 0.3,
-      y: y + 1.1,
-      w: cardW - 0.6,
-      h: 0.6,
-      fontFace: "Calibri",
-      fontSize: 15,
-      bold: true,
-      color: palette.text,
-    });
-    // Sublabel 12pt grey
-    const sub = txt(it.sublabel) || txt(it.detail);
-    if (sub) {
-      slide.addText(sub, {
+    if (it.label) {
+      slide.addText(it.label, {
         x: x + 0.3,
-        y: y + 1.75,
+        y: y + 1.2,
+        w: cardW - 0.6,
+        h: 0.6,
+        fontFace: "Calibri",
+        fontSize: 15,
+        bold: true,
+        color: palette.text,
+      });
+    }
+    if (it.sublabel) {
+      slide.addText(it.sublabel, {
+        x: x + 0.3,
+        y: y + 1.85,
         w: cardW - 0.6,
         h: cardH - 2.0,
         fontFace: "Calibri",
-        fontSize: 12,
+        fontSize: 11,
         color: palette.secondary,
         valign: "top",
       });
@@ -383,12 +408,15 @@ function renderCibles(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palet
     volume?: unknown;
     channel?: unknown;
     priority?: unknown;
-    persona?: unknown;
+    comment?: unknown;
   }>(slidePlan.content?.segments);
+  const topProspects = arr<{ name?: unknown; stand?: unknown; justification?: unknown }>(
+    slidePlan.content?.topProspects,
+  );
 
-  // Horizontal funnel
+  // Funnel (top section)
   const fy = CONTENT_Y;
-  const fh = 1.6;
+  const fh = 1.4;
   const fullW = W - 2 * M;
   const n = Math.max(1, funnel.length);
   for (let i = 0; i < n; i++) {
@@ -420,43 +448,160 @@ function renderCibles(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palet
     });
   }
 
-  if (segments.length === 0) return;
+  let cursorY = fy + fh + 0.3;
 
   // Segments table
-  const tableY = fy + fh + 0.4;
-  const headerCells: pptxgen.TableRow = [
-    { text: "Segment", options: { bold: true, color: "FFFFFF", fill: { color: accent } } },
-    { text: "Volume", options: { bold: true, color: "FFFFFF", fill: { color: accent } } },
-    { text: "Canal", options: { bold: true, color: "FFFFFF", fill: { color: accent } } },
-    { text: "Priorité", options: { bold: true, color: "FFFFFF", fill: { color: accent } } },
-  ];
-  const body = segments.map((s, i) => {
-    const alt = i % 2 === 0 ? palette.card : palette.bg;
-    return [
-      { text: txt(s.name), options: { color: palette.text, bold: true, fill: { color: alt } } },
-      { text: txt(s.volume), options: { color: palette.text, fill: { color: alt } } },
-      { text: txt(s.channel), options: { color: palette.text, fill: { color: alt } } },
-      { text: txt(s.priority), options: { color: palette.text, bold: true, fill: { color: alt } } },
+  if (segments.length > 0) {
+    const headerCells: pptxgen.TableRow = [
+      { text: "Segment", options: { bold: true, color: "FFFFFF", fill: { color: accent } } },
+      { text: "Volume", options: { bold: true, color: "FFFFFF", fill: { color: accent } } },
+      { text: "Canal", options: { bold: true, color: "FFFFFF", fill: { color: accent } } },
+      { text: "Commentaire", options: { bold: true, color: "FFFFFF", fill: { color: accent } } },
     ];
-  });
+    const body = segments.map((s, i) => {
+      const alt = i % 2 === 0 ? palette.card : palette.bg;
+      const commentValue = txt(s.comment) || txt(s.priority);
+      return [
+        { text: txt(s.name), options: { color: palette.text, bold: true, fill: { color: alt } } },
+        { text: txt(s.volume), options: { color: palette.text, fill: { color: alt } } },
+        { text: txt(s.channel), options: { color: palette.text, fill: { color: alt } } },
+        { text: commentValue, options: { color: palette.text, fill: { color: alt } } },
+      ];
+    });
+    slide.addTable([headerCells, ...body], {
+      x: M,
+      y: cursorY,
+      w: W - 2 * M,
+      fontFace: "Calibri",
+      fontSize: 11,
+      border: { type: "solid", color: palette.card, pt: 1 },
+    });
+    cursorY += 0.45 + segments.length * 0.35;
+  }
 
-  slide.addTable([headerCells, ...body], {
-    x: M,
-    y: tableY,
-    w: W - 2 * M,
-    fontFace: "Calibri",
-    fontSize: 12,
-    border: { type: "solid", color: palette.card, pt: 1 },
-  });
+  // TOP PROSPECTS (2 cols)
+  if (topProspects.length > 0 && cursorY < H - M - 0.8) {
+    slide.addText("TOP PROSPECTS", {
+      x: M,
+      y: cursorY,
+      w: W - 2 * M,
+      h: 0.35,
+      fontFace: "Calibri",
+      fontSize: 11,
+      bold: true,
+      color: accent,
+    });
+    const listY = cursorY + 0.4;
+    const colW = (W - 2 * M - 0.3) / 2;
+    const rowsAvail = H - M - listY;
+    const perCol = Math.ceil(topProspects.length / 2);
+    const rowH = Math.min(0.55, rowsAvail / Math.max(1, perCol));
+    topProspects.forEach((p, i) => {
+      const col = Math.floor(i / perCol);
+      const row = i % perCol;
+      const x = M + col * (colW + 0.3);
+      const y = listY + row * rowH;
+      slide.addText(
+        [
+          { text: txt(p.name), options: { bold: true, color: palette.text } },
+          {
+            text: txt(p.stand) ? `  ${txt(p.stand)}` : "",
+            options: { color: accent, bold: true },
+          },
+          {
+            text: txt(p.justification) ? `  · ${txt(p.justification)}` : "",
+            options: { color: palette.secondary, italic: true },
+          },
+        ],
+        {
+          x,
+          y,
+          w: colW,
+          h: rowH,
+          fontFace: "Calibri",
+          fontSize: 11,
+          valign: "middle",
+        },
+      );
+    });
+  }
+}
+
+function threatColor(threat: string): string {
+  const norm = threat
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase();
+  if (norm.includes("ELEVE")) return RED_KO;
+  if (norm.includes("MOYEN")) return "F59E0B";
+  if (norm.includes("FAIBLE")) return GREEN_OK;
+  return "64748B";
 }
 
 function renderConcurrentiel(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palette, accent: string) {
   addTitle(slide, slidePlan.title || "Positionnement", palette);
+  const competitors = arr<{ name?: unknown; threat?: unknown; description?: unknown; scores?: unknown }>(
+    slidePlan.content?.competitors,
+  );
   const criteria = strArr(slidePlan.content?.criteria);
-  const competitors = arr<{ name?: unknown; scores?: unknown }>(slidePlan.content?.competitors);
   const differentiator = txt(slidePlan.content?.differentiator);
 
-  if (criteria.length > 0 && competitors.length > 0) {
+  // New shape : list with threat levels
+  const hasThreatShape = competitors.some(
+    (c) => typeof c.threat === "string" || typeof c.description === "string",
+  );
+
+  let usedH = 0;
+
+  if (hasThreatShape) {
+    const startY = CONTENT_Y;
+    const rowH = Math.min(0.7, (CONTENT_H - 1.2) / Math.max(1, competitors.length));
+    competitors.forEach((c, i) => {
+      const y = startY + i * rowH;
+      slide.addShape("rect", {
+        x: M,
+        y,
+        w: W - 2 * M,
+        h: rowH - 0.08,
+        fill: { color: palette.card },
+        line: { color: palette.card },
+      });
+      slide.addText(txt(c.name), {
+        x: M + 0.25,
+        y,
+        w: 3.0,
+        h: rowH - 0.08,
+        fontFace: "Calibri",
+        fontSize: 13,
+        bold: true,
+        color: palette.text,
+        valign: "middle",
+      });
+      const threat = txt(c.threat);
+      slide.addText(threat.toUpperCase(), {
+        x: M + 3.3,
+        y,
+        w: 1.6,
+        h: rowH - 0.08,
+        fontFace: "Calibri",
+        fontSize: 11,
+        bold: true,
+        color: threatColor(threat),
+        valign: "middle",
+      });
+      slide.addText(txt(c.description), {
+        x: M + 5.0,
+        y,
+        w: W - 2 * M - 5.0 - 0.2,
+        h: rowH - 0.08,
+        fontFace: "Calibri",
+        fontSize: 11,
+        color: palette.secondary,
+        valign: "middle",
+      });
+    });
+    usedH = competitors.length * rowH + 0.2;
+  } else if (criteria.length > 0 && competitors.length > 0) {
     const header: pptxgen.TableRow = [
       { text: "Critère", options: { bold: true, color: "FFFFFF", fill: { color: accent } } },
       ...competitors.map((c) => ({
@@ -474,11 +619,7 @@ function renderConcurrentiel(slide: pptxgen.Slide, slidePlan: SlidePlan, palette
         if (typeof v === "boolean") {
           row.push({
             text: v ? "✓" : "✗",
-            options: {
-              color: v ? GREEN_OK : RED_KO,
-              bold: true,
-              align: "center",
-            },
+            options: { color: v ? GREEN_OK : RED_KO, bold: true, align: "center" },
           });
         } else {
           row.push({ text: txt(v, "—"), options: { color: palette.text, align: "center" } });
@@ -494,48 +635,114 @@ function renderConcurrentiel(slide: pptxgen.Slide, slidePlan: SlidePlan, palette
       fontSize: 12,
       border: { type: "solid", color: palette.card, pt: 1 },
     });
+    usedH = (criteria.length + 1) * 0.35 + 0.2;
   }
 
+  // "DataRouter :" differentiator band at bottom
   if (differentiator) {
+    const bandH = 1.0;
+    const bandY = H - M - bandH;
     slide.addShape("rect", {
       x: M,
-      y: H - 1.6,
+      y: bandY,
       w: W - 2 * M,
-      h: 1.0,
+      h: bandH,
       fill: { color: accent, transparency: 85 },
       line: { color: accent, width: 2 },
     });
-    slide.addText("Notre différenciation", {
+    slide.addText("DataRouter :", {
       x: M + 0.3,
-      y: H - 1.5,
-      w: W - 2 * M - 0.6,
-      h: 0.4,
+      y: bandY + 0.1,
+      w: 2.5,
+      h: 0.35,
       fontFace: "Calibri",
-      fontSize: 11,
+      fontSize: 12,
       bold: true,
       color: accent,
     });
     slide.addText(differentiator, {
       x: M + 0.3,
-      y: H - 1.1,
+      y: bandY + 0.45,
       w: W - 2 * M - 0.6,
-      h: 0.5,
+      h: bandH - 0.5,
       fontFace: "Calibri",
-      fontSize: 14,
+      fontSize: 13,
       bold: true,
-      color: palette.text,
-      valign: "middle",
+      italic: true,
+      color: accent,
+      valign: "top",
     });
   }
 }
 
 function renderTimeline(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palette, accent: string) {
   addTitle(slide, slidePlan.title || "Timeline", palette);
+
+  // New shape: periods as vertical columns with action bullets
+  const periods = arr<{ label?: unknown; actions?: unknown }>(slidePlan.content?.periods);
+
+  if (periods.length > 0) {
+    const cols = Math.min(periods.length, 4);
+    const gap = 0.25;
+    const colW = (W - 2 * M - gap * (cols - 1)) / cols;
+    for (let i = 0; i < cols; i++) {
+      const p = periods[i]!;
+      const x = M + i * (colW + gap);
+      // Card
+      slide.addShape("rect", {
+        x,
+        y: CONTENT_Y,
+        w: colW,
+        h: CONTENT_H,
+        fill: { color: palette.card },
+        line: { color: palette.card },
+      });
+      // Header bar accent
+      slide.addShape("rect", {
+        x,
+        y: CONTENT_Y,
+        w: colW,
+        h: 0.5,
+        fill: { color: accent },
+        line: { color: accent },
+      });
+      slide.addText(txt(p.label), {
+        x: x + 0.15,
+        y: CONTENT_Y,
+        w: colW - 0.3,
+        h: 0.5,
+        fontFace: "Calibri",
+        fontSize: 13,
+        bold: true,
+        color: "FFFFFF",
+        valign: "middle",
+      });
+      const actions = strArr(p.actions);
+      if (actions.length > 0) {
+        slide.addText(
+          actions.map((a) => ({ text: a, options: { bullet: { code: "25CF" } } })),
+          {
+            x: x + 0.2,
+            y: CONTENT_Y + 0.7,
+            w: colW - 0.4,
+            h: CONTENT_H - 0.9,
+            fontFace: "Calibri",
+            fontSize: 11,
+            color: palette.text,
+            paraSpaceAfter: 5,
+            valign: "top",
+          },
+        );
+      }
+    }
+    return;
+  }
+
+  // Fallback : horizontal events timeline
   const events = arr<{ date?: unknown; action?: unknown; detail?: unknown; label?: unknown }>(
     slidePlan.content?.events ?? slidePlan.content?.steps,
   );
   if (events.length === 0) return;
-
   const lineY = CONTENT_Y + CONTENT_H / 2;
   slide.addShape("line", {
     x: M + 0.5,
@@ -544,7 +751,6 @@ function renderTimeline(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pal
     h: 0,
     line: { color: accent, width: 3 },
   });
-
   const n = events.length;
   events.forEach((e, i) => {
     const cx = M + 0.5 + ((i + 0.5) / n) * (W - 2 * M - 1.0);
@@ -605,67 +811,73 @@ function renderMessages(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pal
 
   const gap = 0.2;
   const cardH = (CONTENT_H - gap * (segments.length - 1)) / Math.max(1, segments.length);
+  const headerH = 0.5;
+
   segments.forEach((s, i) => {
     const y = CONTENT_Y + i * (cardH + gap);
-    // Card background
+
+    // Card body
+    slide.addShape("rect", {
+      x: M,
+      y: y + headerH,
+      w: W - 2 * M,
+      h: cardH - headerH,
+      fill: { color: palette.card },
+      line: { color: palette.card },
+    });
+    // Header banner — accent 20% opacity
     slide.addShape("rect", {
       x: M,
       y,
       w: W - 2 * M,
-      h: cardH,
-      fill: { color: palette.card },
-      line: { color: palette.card },
+      h: headerH,
+      fill: { color: accent, transparency: 80 },
+      line: { color: accent, transparency: 80 },
     });
-    // Left accent border
-    slide.addShape("rect", {
-      x: M,
-      y,
-      w: 0.08,
-      h: cardH,
-      fill: { color: accent },
-      line: { color: accent },
-    });
-    // Name
     slide.addText(txt(s.name), {
-      x: M + 0.3,
-      y: y + 0.15,
-      w: 3.0,
-      h: cardH - 0.3,
+      x: M + 0.25,
+      y,
+      w: W - 2 * M - 0.5,
+      h: headerH,
       fontFace: "Calibri",
-      fontSize: 14,
+      fontSize: 16,
       bold: true,
-      color: accent,
+      color: palette.text,
       valign: "middle",
     });
-    // PITCH / HOOK / CTA columns
-    const cols: { label: string; v: string }[] = [
+
+    // Rows : PITCH / HOOK / CTA
+    type Row = { label: string; v: string; italic?: boolean; ctaStyle?: boolean };
+    const rows: Row[] = [
       { label: "PITCH", v: txt(s.pitch) },
-      { label: "HOOK", v: txt(s.hook) },
-      { label: "CTA", v: txt(s.cta) },
+      { label: "HOOK", v: txt(s.hook), italic: true },
+      { label: "CTA", v: txt(s.cta), ctaStyle: true },
     ];
-    const colsStart = M + 3.4;
-    const colsW = W - M - colsStart;
-    const colW = colsW / cols.length;
-    cols.forEach((c, j) => {
-      const cx = colsStart + j * colW;
-      slide.addText(c.label, {
-        x: cx,
-        y: y + 0.15,
-        w: colW - 0.15,
-        h: 0.3,
+    const bodyTop = y + headerH + 0.1;
+    const rowH = (cardH - headerH - 0.15) / rows.length;
+    rows.forEach((r, ri) => {
+      const ry = bodyTop + ri * rowH;
+      slide.addText(r.label, {
+        x: M + 0.25,
+        y: ry,
+        w: 1.0,
+        h: rowH,
         fontFace: "Calibri",
-        fontSize: 9,
+        fontSize: 10,
         bold: true,
         color: palette.secondary,
+        valign: "top",
       });
-      slide.addText(c.v, {
-        x: cx,
-        y: y + 0.45,
-        w: colW - 0.15,
-        h: cardH - 0.55,
+      slide.addText(r.v, {
+        x: M + 1.3,
+        y: ry,
+        w: W - M - (M + 1.3) - 0.2,
+        h: rowH,
         fontFace: "Calibri",
-        fontSize: 11,
-        color: palette.text,
+        fontSize: 13,
+        color: r.ctaStyle ? accent : palette.text,
+        bold: !!r.ctaStyle,
+        italic: !!r.italic,
         valign: "top",
       });
     });
@@ -738,20 +950,23 @@ function renderKpis(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palette
   addTitle(slide, slidePlan.title || "KPIs", palette);
   const metrics = arr<{ value?: unknown; label?: unknown; delta?: unknown }>(slidePlan.content?.metrics);
   const stages = arr<{ name?: unknown; count?: unknown }>(slidePlan.content?.stages ?? slidePlan.content?.pipeline);
+  const trackingTools = strArr(slidePlan.content?.trackingTools);
 
-  // Metrics row
+  // Top half : up to 5 metrics
   if (metrics.length > 0) {
-    const n = Math.max(1, Math.min(4, metrics.length));
+    const n = Math.max(1, Math.min(5, metrics.length));
     const colW = (W - 2 * M) / n;
-    metrics.forEach((m, i) => {
+    const metricsTop = CONTENT_Y;
+    const metricsH = (CONTENT_H - 0.4) / 2;
+    metrics.slice(0, n).forEach((m, i) => {
       const x = M + i * colW;
       slide.addText(txt(m.value), {
         x,
-        y: CONTENT_Y,
+        y: metricsTop,
         w: colW,
-        h: 1.5,
+        h: metricsH * 0.6,
         fontFace: "Calibri",
-        fontSize: 52,
+        fontSize: n >= 5 ? 44 : 52,
         bold: true,
         color: accent,
         align: "center",
@@ -759,9 +974,9 @@ function renderKpis(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palette
       });
       slide.addText(txt(m.label), {
         x,
-        y: CONTENT_Y + 1.55,
+        y: metricsTop + metricsH * 0.62,
         w: colW,
-        h: 0.4,
+        h: metricsH * 0.2,
         fontFace: "Calibri",
         fontSize: 12,
         color: palette.secondary,
@@ -771,11 +986,11 @@ function renderKpis(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palette
       if (delta) {
         slide.addText(delta, {
           x,
-          y: CONTENT_Y + 1.95,
+          y: metricsTop + metricsH * 0.82,
           w: colW,
-          h: 0.4,
+          h: metricsH * 0.18,
           fontFace: "Calibri",
-          fontSize: 12,
+          fontSize: 11,
           bold: true,
           color: GREEN_OK,
           align: "center",
@@ -784,42 +999,71 @@ function renderKpis(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palette
     });
   }
 
-  // Pipeline stages — connected rectangles
+  // Bottom half : pipeline stages with right-arrow connectors
   if (stages.length > 0) {
-    const py = CONTENT_Y + 3.0;
+    const py = CONTENT_Y + (CONTENT_H - 0.4) / 2 + 0.2;
+    const ph = (CONTENT_H - 0.4) / 2 - 0.4;
+    const arrowW = 0.35;
     const total = W - 2 * M;
-    const segW = total / stages.length;
+    const stageW = (total - arrowW * (stages.length - 1)) / stages.length;
     stages.forEach((s, i) => {
-      const x = M + i * segW;
+      const x = M + i * (stageW + arrowW);
       slide.addShape("rect", {
-        x: x + 0.05,
+        x,
         y: py,
-        w: segW - 0.1,
-        h: 1.2,
-        fill: { color: palette.card },
-        line: { color: palette.card },
+        w: stageW,
+        h: ph,
+        fill: { color: accent, transparency: 85 },
+        line: { color: accent, width: 1 },
       });
       slide.addText(txt(s.count), {
         x,
-        y: py + 0.15,
-        w: segW,
-        h: 0.6,
+        y: py + 0.1,
+        w: stageW,
+        h: ph * 0.55,
         fontFace: "Calibri",
-        fontSize: 24,
+        fontSize: 22,
         bold: true,
         color: accent,
         align: "center",
+        valign: "middle",
       });
       slide.addText(txt(s.name), {
         x,
-        y: py + 0.75,
-        w: segW,
-        h: 0.4,
+        y: py + ph * 0.6,
+        w: stageW,
+        h: ph * 0.35,
         fontFace: "Calibri",
         fontSize: 11,
-        color: palette.secondary,
+        bold: true,
+        color: palette.text,
         align: "center",
       });
+      if (i < stages.length - 1) {
+        slide.addShape("rightArrow", {
+          x: x + stageW + 0.02,
+          y: py + ph / 2 - 0.18,
+          w: arrowW - 0.04,
+          h: 0.36,
+          fill: { color: accent },
+          line: { color: accent },
+        });
+      }
+    });
+  }
+
+  // Footer : tracking tools inline
+  if (trackingTools.length > 0) {
+    slide.addText(`OUTILS DE TRACKING — ${trackingTools.join(" — ")}`, {
+      x: M,
+      y: H - 0.8,
+      w: W - 2 * M,
+      h: 0.35,
+      fontFace: "Calibri",
+      fontSize: 10,
+      bold: true,
+      color: palette.secondary,
+      align: "center",
     });
   }
 }
@@ -1192,8 +1436,10 @@ function renderRisques(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pale
 function renderHandover(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Palette, accent: string) {
   addTitle(slide, slidePlan.title || "Passation", palette);
   const steps = arr<{ date?: unknown; label?: unknown }>(slidePlan.content?.steps);
-  const livrables = strArr(slidePlan.content?.livrables);
-  const lineY = CONTENT_Y + 0.9;
+  const livrablesRaw = arr<unknown>(slidePlan.content?.livrables);
+
+  // Top timeline (alternating above/below labels)
+  const lineY = CONTENT_Y + 0.95;
   if (steps.length > 0) {
     slide.addShape("line", {
       x: M + 0.4,
@@ -1213,9 +1459,10 @@ function renderHandover(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pal
         fill: { color: accent },
         line: { color: accent },
       });
+      const above = i % 2 === 0;
       slide.addText(txt(s.date), {
         x: cx - 1.3,
-        y: lineY - 0.65,
+        y: above ? lineY - 0.75 : lineY + 0.55,
         w: 2.6,
         h: 0.3,
         fontFace: "Calibri",
@@ -1226,49 +1473,85 @@ function renderHandover(slide: pptxgen.Slide, slidePlan: SlidePlan, palette: Pal
       });
       slide.addText(txt(s.label), {
         x: cx - 1.3,
-        y: lineY + 0.2,
+        y: above ? lineY - 0.4 : lineY + 0.2,
         w: 2.6,
-        h: 0.5,
+        h: 0.4,
         fontFace: "Calibri",
-        fontSize: 12,
+        fontSize: 11,
         color: palette.text,
         align: "center",
       });
     });
   }
+
+  // Livrables — 2 cols, max 6, supports string[] or {title, description}[]
+  type Liv = { title: string; description: string };
+  const livrables: Liv[] = livrablesRaw.slice(0, 6).map((l) => {
+    if (typeof l === "string") return { title: l, description: "" };
+    if (l && typeof l === "object") {
+      const obj = l as any;
+      return { title: txt(obj.title) || txt(obj.label), description: txt(obj.description) };
+    }
+    return { title: "", description: "" };
+  });
+
   if (livrables.length > 0) {
-    slide.addText("Livrables", {
+    const livY = lineY + 1.5;
+    slide.addText("LIVRABLES", {
       x: M,
-      y: CONTENT_Y + 2.6,
+      y: livY,
       w: W - 2 * M,
-      h: 0.4,
+      h: 0.35,
       fontFace: "Calibri",
-      fontSize: 16,
+      fontSize: 11,
       bold: true,
-      color: palette.text,
+      color: accent,
     });
+    const listTop = livY + 0.4;
+    const colGap = 0.4;
+    const colW = (W - 2 * M - colGap) / 2;
+    const perCol = Math.ceil(livrables.length / 2);
+    const rowsAvail = H - M - listTop;
+    const rowH = Math.min(0.85, rowsAvail / Math.max(1, perCol));
     livrables.forEach((l, i) => {
-      const y = CONTENT_Y + 3.1 + i * 0.45;
+      const col = Math.floor(i / perCol);
+      const row = i % perCol;
+      const x = M + col * (colW + colGap);
+      const y = listTop + row * rowH;
       slide.addText(String(i + 1).padStart(2, "0"), {
-        x: M,
+        x,
         y,
-        w: 0.6,
-        h: 0.4,
+        w: 0.55,
+        h: rowH,
         fontFace: "Calibri",
         fontSize: 14,
         bold: true,
         color: accent,
+        valign: "top",
       });
-      slide.addText(l, {
-        x: M + 0.7,
+      slide.addText(l.title, {
+        x: x + 0.65,
         y,
-        w: W - 2 * M - 0.7,
-        h: 0.4,
+        w: colW - 0.65,
+        h: rowH * 0.45,
         fontFace: "Calibri",
-        fontSize: 13,
+        fontSize: 12,
+        bold: true,
         color: palette.text,
-        valign: "middle",
+        valign: "top",
       });
+      if (l.description) {
+        slide.addText(l.description, {
+          x: x + 0.65,
+          y: y + rowH * 0.45,
+          w: colW - 0.65,
+          h: rowH * 0.55,
+          fontFace: "Calibri",
+          fontSize: 11,
+          color: palette.secondary,
+          valign: "top",
+        });
+      }
     });
   }
 }
