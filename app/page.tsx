@@ -117,6 +117,20 @@ export default function Home() {
     return () => window.removeEventListener("fiche:show", onShow);
   }, []);
 
+  /* Market shortcut buttons in the sidebar fire this event. */
+  useEffect(() => {
+    function onMarket(e: Event) {
+      const detail = (e as CustomEvent<{ market: string }>).detail;
+      if (!detail?.market) return;
+      handleSend(
+        `Donne-moi les 3 diffuseurs prioritaires à prospecter sur le marché ${detail.market} avec leur score et l'angle email recommandé pour chacun.`,
+      );
+    }
+    window.addEventListener("market:selected", onMarket);
+    return () => window.removeEventListener("market:selected", onMarket);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy]);
+
   const dynamicSuggestions = useMemo(() => {
     const last = messages[messages.length - 1];
     if (!last || last.role !== "agent" || last.streaming) return [];

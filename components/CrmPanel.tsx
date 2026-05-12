@@ -11,6 +11,19 @@ import {
 
 const STATUSES: CrmStatus[] = ["Cold", "Contacté", "En discussion", "Deal", "Perdu"];
 
+const MARKETS: { label: string; flag: string }[] = [
+  { label: "Belgique FR", flag: "🇧🇪" },
+  { label: "Belgique FL", flag: "🇧🇪" },
+  { label: "Pays-Bas", flag: "🇳🇱" },
+  { label: "France", flag: "🇫🇷" },
+];
+
+function selectMarket(label: string) {
+  window.dispatchEvent(
+    new CustomEvent("market:selected", { detail: { market: label } }),
+  );
+}
+
 const STATUS_COLOR: Record<CrmStatus, string> = {
   Cold: "text-slate-300",
   Contacté: "text-blue-300",
@@ -58,7 +71,23 @@ export function CrmPanel() {
 
   return (
     <aside className="hidden h-full w-[30%] flex-col border-l border-border bg-bg lg:flex">
-      <div className="px-6 py-5">
+      <div className="px-6 pb-2 pt-5">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
+          Marchés
+        </h2>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {MARKETS.map((m) => (
+            <button
+              key={m.label}
+              onClick={() => selectMarket(m.label)}
+              className="rounded-lg border border-border bg-panel px-3 py-2 text-left text-xs text-white/85 transition hover:border-accent hover:text-white"
+            >
+              <span className="mr-1">{m.flag}</span> {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="border-t border-border px-6 pb-2 pt-5">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">
           Pipeline CRM
         </h2>
@@ -66,7 +95,7 @@ export function CrmPanel() {
           {entries.length} prospect{entries.length !== 1 ? "s" : ""} · stocké localement
         </p>
       </div>
-      <div className="flex-1 overflow-y-auto px-4 pb-6">
+      <div className="flex-1 overflow-y-auto px-4 pb-6 pt-3">
         {STATUSES.map((s) => (
           <div key={s} className="mb-5">
             <div className={`mb-2 text-xs font-medium uppercase tracking-wider ${STATUS_COLOR[s]}`}>
