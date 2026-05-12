@@ -2,6 +2,7 @@ import type { ChatTurn } from "./agent";
 import {
   PPTX_PLANNER_SYSTEM,
   safeParseDeckPlan,
+  containsForbiddenWords,
   DeckPlan,
 } from "./tools/pptxPlanner";
 import { generatePptx } from "./tools/pptxGenerator";
@@ -32,6 +33,32 @@ export type PptxFlowResult =
     }
   | { ok: false; error: string };
 
+function validatePlan(plan: DeckPlan): string | null {
+  if (!plan || typeof plan !== "object") return "Plan absent";
+  if (!Array.isArray(plan.slides) || plan.slides.length === 0) return "Aucun slide planifié";
+  for (let i = 0; i < plan.slides.length; i++) {
+    const s = plan.slides[i]!;
+    if (typeof s.type !== "string") return `Slide ${i + 1} : type invalide`;
+    if (s.content == null || typeof s.content !== "object" || Array.isArray(s.content)) {
+      return `Slide ${i + 1} (${s.type}) : content doit être un objet`;
+    }
+  }
+  return null;
+}
+
+function logPlan(plan: DeckPlan) {
+  console.log("📊 Plan deck:", JSON.stringify(plan, null, 2));
+  console.log(`📊 ${plan.slides.length} slides — ${plan.tone} / ${plan.audience} / ${plan.colorScheme}`);
+  plan.slides.forEach((s, i) => {
+    const keys = Object.keys(s.content ?? {}).join(", ") || "(vide)";
+    console.log(`   ${i + 1}. ${s.type.padEnd(16)} title="${s.title}" content keys: ${keys}`);
+  });
+  const forbidden = containsForbiddenWords(JSON.stringify(plan));
+  if (forbidden.length > 0) {
+    console.warn("⚠️ Mots interdits détectés (post-scrub) :", forbidden);
+  }
+}
+
 export async function runPptxFlow(
   apiKey: string,
   userMessage: string,
@@ -48,7 +75,7 @@ export async function runPptxFlow(
       body: JSON.stringify({
         model: GROQ_MODEL,
         stream: false,
-        temperature: 0.5,
+        temperature: 0.4,
         max_tokens: 4096,
         response_format: { type: "json_object" },
         messages: [
@@ -69,15 +96,23 @@ export async function runPptxFlow(
   const raw: string = payload?.choices?.[0]?.message?.content ?? "";
   const plan: DeckPlan | null = safeParseDeckPlan(raw);
   if (!plan) {
+    console.error("❌ Plan JSON non parsable. Raw :", raw.slice(0, 500));
     return { ok: false, error: "Plan JSON invalide ou inutilisable." };
   }
 
-  console.log("📊 Plan deck:", JSON.stringify(plan, null, 2));
+  const validationError = validatePlan(plan);
+  if (validationError) {
+    console.error("❌ Plan invalide :", validationError);
+    return { ok: false, error: `Plan invalide : ${validationError}` };
+  }
+
+  logPlan(plan);
 
   let buffer: Buffer;
   try {
     buffer = await generatePptx(plan);
   } catch (e) {
+    console.error("❌ Erreur génération PPTX :", e);
     return { ok: false, error: `Erreur génération PPTX : ${(e as Error).message}` };
   }
 
